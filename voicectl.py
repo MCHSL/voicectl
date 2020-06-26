@@ -34,7 +34,7 @@ class CommandEntry:
 		
 	def create_kwargs(self, expr):
 		match = self.match(expr)
-		if not match:
+		if match is None:
 			return None
 		groups = match.groups()
 		result = {}
@@ -45,7 +45,7 @@ class CommandEntry:
 		
 	def try_invoke(self, expr):
 		kwargs = self.create_kwargs(expr)
-		if not kwargs:
+		if kwargs is None:
 			return False
 		
 		self.__callback(**kwargs)
@@ -85,6 +85,8 @@ class VoiceController:
 	def listen_for_command(self):
 		self.on_triggered()
 		speech = self.__hq_recognizer.recognize_once().text.translate(str.maketrans('', '', string.punctuation))
+		
+		print(speech)
 
 		for command in self.__commands:
 			if command.try_invoke(speech):
