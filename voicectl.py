@@ -5,6 +5,52 @@ import string
 import time
 from pocketsphinx import LiveSpeech
 import threading
+import re
+
+
+class CommandEntry:
+	def __init__(self, pattern, cb):
+		self.__callback = cb
+		self.__pattern = pattern
+		self.__varnames = []
+		
+		re_pattern = []
+		words = pattern.split()
+		for word in words:
+			if word.startswith("$"):
+				if word.endswith("..."):
+					word = word[:-3]
+					re_pattern.append(r"(.*)")
+				else:
+					re_pattern.append(r"(\w+)")
+				self.__varnames.append(word[1:])
+			else:
+				re_pattern.append(word)
+				
+		self.__regex = re.compile(" ".join(re_pattern), re.IGNORECASE)
+		
+	def match(self, expr):
+		return self.__regex.fullmatch(expr)
+		
+	def create_kwargs(self, expr):
+		match = self.match(expr)
+		if not match:
+			return None
+		groups = match.groups()
+		result = {}
+		for varname, group in zip(self.__varnames, groups):
+			result[varname] = group
+			
+		return result
+		
+	def try_invoke(self, expr):
+		kwargs = self.create_kwargs(expr)
+		if not kwargs:
+			return False
+		
+		self.__callback(**kwargs)
+		return True
+		
 
 class VoiceController:
 	def __init__(self, api_key, keyword="computer", region="westus", languages=None):
@@ -31,26 +77,18 @@ class VoiceController:
 		self.on_unknown_command = lambda *x: x
 		self.on_error = lambda *x: x
 		
-		self.__commands = {}
+		self.__commands = []
 		
-	def add_command(self, keyword, fn):
-		self.__commands[keyword] = fn
+	def add_command(self, pattern, callback):
+		self.__commands.append(CommandEntry(pattern, callback))
 		
 	def listen_for_command(self):
 		self.on_triggered()
 		speech = self.__hq_recognizer.recognize_once().text.translate(str.maketrans('', '', string.punctuation))
-		split_speech = speech.split(" ",1)
-		first_word = unidecode.unidecode(split_speech[0].lower().strip())
-		
-		if first_word in self.__commands:
-			rest = ""
-			if len(split_speech) > 1:
-				rest = split_speech[1]
-			self.on_begin_command(first_word, rest)
-			self.__commands[first_word](rest)
-			self.on_finish_command(first_word, rest)
-		else:
-			self.on_unknown_command(first_word)
+
+		for command in self.__commands:
+			if command.try_invoke(speech):
+				break
 		
 	def on_audio(self, recognizer, audio):
 		try:
