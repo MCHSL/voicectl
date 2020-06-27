@@ -2,8 +2,8 @@
 Alexa/Google Assistant/Voice whatever clone
 
 # Installation
-This library requires Python 3.8.  
-The requirements file does not include PyAudio due to compilation problems. Install it separately. If you encounter issues you can install the .whl file from here: https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio
+This library requires Python 3.8, 64-bit.  
+The requirements file does not include PyAudio due to compilation problems. Install it separately. If you encounter issues you can install the .whl file from here: https://www.lfd.uci.edu/~gohlke/pythonlibs/#pyaudio. Makre sure you download the right wheel file, add the time of writing the name is `PyAudio‑0.2.11‑cp38‑cp38‑win_amd64.whl`
 
 # What is this?
 Voicectl is a library for creating a voice assistant, similar to Amazon's Alexa. You can add voice commands that when matched, trigger python functions.
