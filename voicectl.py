@@ -125,14 +125,18 @@ class VoiceController:
 		
 	def perform_all_commands(self, cmd):
 		while True:
+			has_match = False
 			for command in self.__commands:
 				result, next_command = command.try_invoke(cmd)
 				if result:
+					has_match = True
 					if next_command:
 						cmd = next_command
 					else:
 						return
-		self.on_unknown_command(speech)
+			if not has_match:
+				break
+		self.on_unknown_command(cmd)
 		
 	def listen_for_command(self):
 		self.__active = True
