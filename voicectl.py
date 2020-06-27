@@ -14,6 +14,7 @@ class CommandEntry:
 		self.__callback = cb
 		self.__pattern = pattern
 		self.__varnames = {}
+		self.__can_chain = False
 		
 		re_pattern = []
 		words = pattern.split()
@@ -52,7 +53,12 @@ class CommandEntry:
 			else:
 				re_pattern.append(word)
 				
+		if re_pattern[-1] != "(.*)":
+			self.__can_chain = True
+			re_pattern.append("?(?:and then(?P<next_command>.*))?")
+			
 		print(re_pattern)
+			
 		self.__regex = re.compile(" ".join(re_pattern), re.IGNORECASE)
 		
 	def match(self, expr):
@@ -61,21 +67,29 @@ class CommandEntry:
 	def create_kwargs(self, expr):
 		match = self.match(expr)
 		if match is None:
-			return None
+			return None, None
 		groups = match.groups()
 		result = {}
 		for varname in self.__varnames:
 			result[varname] = groups[self.__varnames[varname]]
 			
-		return result
+		if self.__can_chain:
+			nextc = match.group("next_command")
+			if nextc:
+				return result, nextc[1:]
+			else:
+				return result, None
+		else:
+			return result, None
+
 		
 	def try_invoke(self, expr):
-		kwargs = self.create_kwargs(expr)
+		kwargs, next_command = self.create_kwargs(expr)
 		if kwargs is None:
-			return False
+			return False, None
 		
 		self.__callback(**kwargs)
-		return True
+		return True, next_command
 		
 
 class VoiceController:
@@ -109,6 +123,17 @@ class VoiceController:
 	def add_command(self, pattern, callback):
 		self.__commands.append(CommandEntry(pattern, callback))
 		
+	def perform_all_commands(self, cmd):
+		while True:
+			for command in self.__commands:
+				result, next_command = command.try_invoke(cmd)
+				if result:
+					if next_command:
+						cmd = next_command
+					else:
+						return
+		self.on_unknown_command(speech)
+		
 	def listen_for_command(self):
 		self.__active = True
 		self.on_triggered()
@@ -116,24 +141,8 @@ class VoiceController:
 		
 		speech = speech.replace("please", "").replace("Please", "").strip()
 		print(speech)
-
-		for command in self.__commands:
-			if command.try_invoke(speech):
-				self.__active = False
-				return
-				
+		self.perform_all_commands(speech)
 		self.__active = False
-		self.on_unknown_command(speech)
-		
-	def on_audio(self, recognizer, audio):
-		try:
-			text = self.__lq_recognizer.recognize_sphinx(audio, keyword_entries=[(self.__keyword, 1.0)])
-		except sr.UnknownValueError:
-			return
-		if text.lower().strip() == self.__keyword:
-			t = threading.Thread(target=self.listen_for_command)
-			t.daemon = True
-			t.start()
 
 
 	def start_listening(self):
