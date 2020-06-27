@@ -22,7 +22,9 @@ controller.start_listening()
 
 In this example we add a command that greets a certain person. The first argument to controller.add_command is the string that when spoken, will trigger the function passed as the second argument.  
 You can use variables in command strings to enable the users to pass arguments. Variables in command strings are prefixed with `$`. They are passed as keyword arguments to callbacks.  
-In the example, if the user says "Say hello to Adam", `greet` will be called with the argument `Adam`.
+In the example, if the user says "Say hello to Adam", `greet` will be called with the argument `Adam`.  
+
+Commands can be chained using `and then`. For example, you can say `greet Adam and then greet Eve`, to invoke our example function twice, first with Adam, then with Eve. 
 
 Current ways of capturing arguments:
 | Command string                                                     | Spoken phrase                                | Arguments                                               | Comment                                                                                           |
