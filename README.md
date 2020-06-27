@@ -24,7 +24,7 @@ In this example we add a command that greets a certain person. The first argumen
 You can use variables in command strings to enable the users to pass arguments. Variables in command strings are prefixed with `$`. They are passed as keyword arguments to callbacks.  
 In the example, if the user says "Say hello to Adam", `greet` will be called with the argument `Adam`.  
 
-Commands can be chained using `and then`, with the exception of commands that end with `$var...`. For example, you can say `greet Adam and then greet Eve`, to invoke our example function twice, first with Adam, then with Eve. 
+Commands can be chained using `and then`, with the exception of commands that end with `$var...`. For example, you can say `Say hello to Adam and then say hello to Eve`, to invoke our example function twice, first with Adam, then with Eve. 
 
 Current ways of capturing arguments:
 | Command string                                                     | Spoken phrase                                | Arguments                                               | Comment                                                                                           |
