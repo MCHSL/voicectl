@@ -1,11 +1,12 @@
 import azure.cognitiveservices.speech as speechsdk
-import speech_recognition as sr
 import unidecode
 import string
 import time
-from pocketsphinx import LiveSpeech
 import threading
 import re
+import pyaudio
+import json
+from vosk import Model, KaldiRecognizer
 
 
 class CommandEntry:
@@ -16,17 +17,39 @@ class CommandEntry:
 		
 		re_pattern = []
 		words = pattern.split()
-		for word in words:
+		words_to_skip = 0
+		for idx, word in enumerate(words):
+			if words_to_skip:
+				words_to_skip -= 1
+				continue
 			if word.startswith("$"):
-				if word.endswith("..."):
+				word = word[1:]
+				if word.endswith(")"):
+					opening_loc = word.find("(")
+					re_pattern.append(word[opening_loc:])
+					word = word[:opening_loc]
+				elif word.endswith("..."):
 					word = word[:-3]
 					re_pattern.append(r"(.*)")
 				else:
 					re_pattern.append(r"(\w+)")
-				self.__varnames.append(word[1:])
+				self.__varnames.append(word)
+			elif word.startswith("("):
+				if word.endswith(")"):
+					re_pattern.append(word)
+					continue
+				idx += 1
+				words_to_skip += 1
+				while not words[idx].endswith(")"):
+					word += " " + words[idx]
+					idx += 1
+					words_to_skip += 1
+				word += " " + words[idx]
+				re_pattern.append(word)
 			else:
 				re_pattern.append(word)
 				
+		print(re_pattern)
 		self.__regex = re.compile(" ".join(re_pattern), re.IGNORECASE)
 		
 	def match(self, expr):
@@ -66,9 +89,8 @@ class VoiceController:
 			self.__hq_recognizer = speechsdk.SpeechRecognizer(speech_config=self.__config, language=self.__languages[0])
 		else:
 			self.__hq_recognizer = speechsdk.SpeechRecognizer(speech_config=self.__config, auto_detect_source_language_config=speechsdk.languageconfig.AutoDetectSourceLanguageConfig(languages=self.__languages))
-			
-		self.__microphone = sr.Microphone()
-		self.__lq_recognizer = sr.Recognizer()
+
+		self.__lq_recognizer = KaldiRecognizer(Model("model"), 16000, self.__keyword + " [unk]")
 		
 		self.on_ready = lambda *x: x
 		self.on_triggered = lambda *x: x
@@ -78,19 +100,25 @@ class VoiceController:
 		self.on_error = lambda *x: x
 		
 		self.__commands = []
+		self.next_activation = time.time()
+		self.__active = False
 		
 	def add_command(self, pattern, callback):
 		self.__commands.append(CommandEntry(pattern, callback))
 		
 	def listen_for_command(self):
+		self.__active = True
 		self.on_triggered()
 		speech = self.__hq_recognizer.recognize_once().text.translate(str.maketrans('', '', string.punctuation))
 		
+		speech = speech.replace("please", "").replace("Please", "").strip()
 		print(speech)
 
 		for command in self.__commands:
 			if command.try_invoke(speech):
 				break
+				
+		self.__active = False
 		
 	def on_audio(self, recognizer, audio):
 		try:
@@ -104,9 +132,20 @@ class VoiceController:
 
 
 	def start_listening(self):
-		with self.__microphone as source:
-			self.__lq_recognizer.adjust_for_ambient_noise(source)
-		stop_listening = self.__lq_recognizer.listen_in_background(self.__microphone, self.on_audio, phrase_time_limit=2.0)
-		self.on_ready()
+		p = pyaudio.PyAudio()
+		stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
+		stream.start_stream()
 		while True:
-			time.sleep(100)
+			data = stream.read(4000)
+			if len(data) == 0:
+				break
+			if self.__lq_recognizer.AcceptWaveform(data):
+				result = self.__lq_recognizer.Result()
+				if not self.__active and self.__keyword in json.loads(result)["text"]:
+					if self.next_activation > time.time():
+						continue
+					self.__active = True
+					t = threading.Thread(target=self.listen_for_command)
+					t.daemon = True
+					t.start()
+					self.next_activation = time.time() + 5
