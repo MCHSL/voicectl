@@ -13,11 +13,12 @@ class CommandEntry:
 	def __init__(self, pattern, cb):
 		self.__callback = cb
 		self.__pattern = pattern
-		self.__varnames = []
+		self.__varnames = {}
 		
 		re_pattern = []
 		words = pattern.split()
 		words_to_skip = 0
+		current_group = 0
 		for idx, word in enumerate(words):
 			if words_to_skip:
 				words_to_skip -= 1
@@ -33,8 +34,10 @@ class CommandEntry:
 					re_pattern.append(r"(.*)")
 				else:
 					re_pattern.append(r"(\w+)")
-				self.__varnames.append(word)
+				self.__varnames[word] = current_group
+				current_group += 1
 			elif word.startswith("("):
+				current_group += 1
 				if word.endswith(")"):
 					re_pattern.append(word)
 					continue
@@ -61,8 +64,8 @@ class CommandEntry:
 			return None
 		groups = match.groups()
 		result = {}
-		for varname, group in zip(self.__varnames, groups):
-			result[varname] = group
+		for varname in self.__varnames:
+			result[varname] = groups[self.__varnames[varname]]
 			
 		return result
 		
@@ -144,7 +147,7 @@ class VoiceController:
 				break
 			if self.__lq_recognizer.AcceptWaveform(data):
 				result = self.__lq_recognizer.Result()
-				if not self.__active and self.__keyword in json.loads(result)["text"]:
+				if not self.__active and json.loads(result)["text"] == self.__keyword:
 					if self.next_activation > time.time():
 						continue
 					self.__active = True
