@@ -116,9 +116,11 @@ class VoiceController:
 
 		for command in self.__commands:
 			if command.try_invoke(speech):
-				break
+				self.__active = False
+				return
 				
 		self.__active = False
+		self.on_unknown_command(speech)
 		
 	def on_audio(self, recognizer, audio):
 		try:
@@ -135,6 +137,7 @@ class VoiceController:
 		p = pyaudio.PyAudio()
 		stream = p.open(format=pyaudio.paInt16, channels=1, rate=16000, input=True, frames_per_buffer=8000)
 		stream.start_stream()
+		self.on_ready()
 		while True:
 			data = stream.read(4000)
 			if len(data) == 0:
