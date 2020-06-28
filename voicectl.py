@@ -132,6 +132,7 @@ class VoiceController:
 					has_match = True
 					if next_command:
 						cmd = next_command
+						break
 					else:
 						return
 			if not has_match:
@@ -141,9 +142,8 @@ class VoiceController:
 	def listen_for_command(self):
 		self.__active = True
 		self.on_triggered()
-		speech = self.__hq_recognizer.recognize_once().text.translate(str.maketrans('', '', string.punctuation))
-		
-		speech = speech.replace("please", "").replace("Please", "").strip()
+		speech = self.__hq_recognizer.recognize_once().text.translate(str.maketrans('', '', string.punctuation)).lower()
+
 		print(speech)
 		self.perform_all_commands(speech)
 		self.__active = False
