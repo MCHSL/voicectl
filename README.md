@@ -22,7 +22,9 @@ controller.start_listening()
 
 In this example we add a command that greets a certain person. The first argument to controller.add_command is the string that when spoken, will trigger the function passed as the second argument.  
 You can use variables in command strings to enable the users to pass arguments. Variables in command strings are prefixed with `$`. They are passed as keyword arguments to callbacks.  
-In the example, if the user says "Say hello to Adam", `greet` will be called with the argument `Adam`.
+In the example, if the user says "Say hello to Adam", `greet` will be called with the argument `Adam`.  
+
+Commands can be chained using `and then`, with the exception of commands that end with `$var...`. For example, you can say `Say hello to Adam and then say hello to Eve`, to invoke our example function twice, first with Adam, then with Eve. 
 
 Current ways of capturing arguments:
 | Command string                                                     | Spoken phrase                                | Arguments                                               | Comment                                                                                           |
@@ -30,7 +32,7 @@ Current ways of capturing arguments:
 | "$name is cool"                                                    | "Adam is cool"                               | name = "Adam"                                           |                                                                                                   |
 | "play $song..."                                                    | "Play something nice"                        | song = "something nice"                                 | Adding `...` after the variable name captures on or more words.                                   |
 | "play $song... on youtube"                                         | "Play something cool on youtube"             | song = "something cool"                                 |                                                                                                   |
-| "play &song... on $service"                                        | "Play despacito 2 on discord."               | song = "despacito 2", service = "discord"               |                                                                                                   |
+| "play $song... on $service"                                        | "Play despacito 2 on discord."               | song = "despacito 2", service = "discord"               |                                                                                                   |
 | "(nevermind\|never mind)"                                          | "Nevermind"                                  | -                                                       | The user can say one of any of the phrases in parentheses.                                        |
 | "turn $dir(up\|down) the volume"                                   | "Turn down the volume"                       | dir = "down"                                            | The user must say one of the phrases in parentheses. The chosen word is passed in as an argument. |
 | "buy $who $what... while you are at $restaurant(kfc\|burger king)" | "Buy me some hot wings while you are at KFC" | who = "me", what = "some hot wings", restaurant = "KFC" |                                                                                                   |                                                                                         |
