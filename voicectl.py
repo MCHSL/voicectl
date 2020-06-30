@@ -10,7 +10,7 @@ from vosk import Model, KaldiRecognizer
 
 
 class CommandEntry:
-	def __init__(self, pattern, cb):
+	def __init__(self, pattern, cb, alternative_words):
 		self.__callback = cb
 		self.__pattern = pattern
 		self.__varnames = {}
@@ -51,6 +51,10 @@ class CommandEntry:
 				word += " " + words[idx]
 				re_pattern.append(word)
 			else:
+				alts = alternative_words.get(word, None)
+				if alts:
+					word = "(" + word + "|"
+					word += "|".join(alts) + ")"
 				re_pattern.append(word)
 
 		if re_pattern[-1] != "(.*)":
@@ -128,9 +132,20 @@ class VoiceController:
 		self.__commands = []
 		self.next_activation = time.time()
 		self.__active = False
+		self.__alternatives = {}
 
 	def add_command(self, pattern, callback):
-		self.__commands.append(CommandEntry(pattern, callback))
+		self.__commands.append(
+		    CommandEntry(pattern, callback, self.__alternatives))
+
+	def add_alternatives(self, word_or_dict, alts=[]):
+		if type(word_or_dict) == dict:
+			self.__alternatives.update(word_or_dict)
+		else:
+			if word_or_dict in self.__alternatives:
+				self.__alternatives[word_or_dict] += alts
+			else:
+				self.__alternatives[word_or_dict] = alts
 
 	def perform_all_commands(self, cmd):
 		while True:
