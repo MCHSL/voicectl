@@ -7,6 +7,26 @@ import re
 import pyaudio
 import json
 from vosk import Model, KaldiRecognizer
+import numpy as np
+import wave
+
+# https://scimusing.wordpress.com/2013/10/25/ring-buffers-in-pythonnumpy/
+class RingBuffer():
+    "A 1D ring buffer using numpy arrays"
+    def __init__(self, length):
+        self.data = np.zeros(length, dtype=np.int16)
+        self.index = 0
+
+    def extend(self, x):
+        "adds array x to ring buffer"
+        x_index = (self.index + np.arange(x.size)) % self.data.size
+        self.data[x_index] = x
+        self.index = x_index[-1] + 1
+
+    def get(self, offset):
+        "Returns the first-in-first-out data in the ring buffer"
+        idx = (self.index + np.arange(self.data.size) - offset) %self.data.size
+        return self.data[idx]
 
 
 class CommandEntry:
@@ -94,34 +114,53 @@ class CommandEntry:
 		self.__callback(**kwargs)
 		return True, next_command
 
+WAITING_FOR_WAKEWORD = 0
+RECORDING_COMMAND = 1
 
 class VoiceController:
 	def __init__(self,
 	             api_key,
-	             keyword="computer",
-	             region="westus",
+	             wake_word="computer",
+	             region="eastus",
 	             languages=None):
 		self.__api_key = api_key
-		self.__keyword = keyword
+		self.__wake_word = wake_word
 		self.__region = region
 		self.__languages = languages
 		if not self.__languages:
 			self.__languages = ["en-US"]
 
+		# Are we currently processing a command?
+		self.__active = False
+
+		# Samples per second to read from mic (single channel)
+		self.__framerate = 44100
+
 		self.__config = speechsdk.SpeechConfig(subscription=self.__api_key,
 		                                       region=self.__region)
+
+		# Write sounds to this stream to send it to azure's speech recognition
+		self.__hq_stream = speechsdk.audio.PushAudioInputStream(stream_format = speechsdk.audio.AudioStreamFormat(samples_per_second=self.__framerate))
+		self.__audio_config = speechsdk.AudioConfig(stream = self.__hq_stream)
+
 		if len(self.__languages) == 1:
 			self.__hq_recognizer = speechsdk.SpeechRecognizer(
-			    speech_config=self.__config, language=self.__languages[0])
+			    speech_config=self.__config, language=self.__languages[0], audio_config = self.__audio_config)
 		else:
 			self.__hq_recognizer = speechsdk.SpeechRecognizer(
 			    speech_config=self.__config,
 			    auto_detect_source_language_config=speechsdk.languageconfig.
-			    AutoDetectSourceLanguageConfig(languages=self.__languages))
+			    AutoDetectSourceLanguageConfig(languages=self.__languages), audio_config = self.__audio_config)
 
-		self.__lq_recognizer = KaldiRecognizer(Model("model"), 16000,
-		                                       self.__keyword + " [unk]")
+		# Recognizer used to detect the wake word
+		self.__lq_recognizer = KaldiRecognizer(Model("model"), self.__framerate,'["' + self.__wake_word + '"]')
 
+		# Add callbacks to azure events
+		self.__hq_recognizer.recognized.connect(self.on_recognized)
+		self.__hq_recognizer.session_stopped.connect(self.on_session_stopped)
+		self.__hq_recognizer.canceled.connect(self.on_session_stopped)
+
+		# Callbacks
 		self.on_ready = lambda *x: x
 		self.on_triggered = lambda *x: x
 		self.on_begin_command = lambda *x: x
@@ -129,14 +168,30 @@ class VoiceController:
 		self.on_unknown_command = lambda *x: x
 		self.on_error = lambda *x: x
 
+		# List of commands
 		self.__commands = []
-		self.next_activation = time.time()
-		self.__active = False
 		self.__alternatives = {}
 
+		self.__buffer_size = 5
+		self.wake_buffer = RingBuffer(self.__buffer_size * self.__framerate)
+
+		self.recognized = threading.Event()
+		self.mode = WAITING_FOR_WAKEWORD
+
+		# Future returned by Azure's recognize_once_async, not sure what the point is since you can just
+		# connect callbacks
+		self.fut = None
+
+		# Number of frames missed by the local recognizer while processing commands
+		self.missed_frames = 0
+
+	def on_session_stopped(self, evt):
+		if self.fut:
+			self.fut.get()
+		self.fut = None
+
 	def add_command(self, pattern, callback):
-		self.__commands.append(
-		    CommandEntry(pattern, callback, self.__alternatives))
+		self.__commands.append(CommandEntry(pattern, callback, self.__alternatives))
 
 	def add_alternatives(self, word_or_dict, alts=[]):
 		if type(word_or_dict) == dict:
@@ -163,37 +218,74 @@ class VoiceController:
 				break
 		self.on_unknown_command(cmd)
 
-	def listen_for_command(self):
-		self.__active = True
-		self.on_triggered()
-		speech = self.__hq_recognizer.recognize_once().text.translate(
-		    str.maketrans('', '', string.punctuation)).lower()
+	def on_recognized(self, event):
+		try:
+			speech = event.result.text.translate(str.maketrans('', '', string.punctuation)).lower()
+			print("Recognized: {}".format(speech))
+			self.perform_all_commands(speech)
+			self.fut.get()
+			self.fut = None
 
-		print(speech)
-		self.perform_all_commands(speech)
-		self.__active = False
+			self.mode = WAITING_FOR_WAKEWORD
+		except Exception as e:
+			print(e)
+
+	def audio_callback(self, in_data, frame_count, time_info, status):
+		if status:
+			print(status)
+
+		audio_data = np.fromstring(in_data, dtype=np.int16)
+		if self.mode == WAITING_FOR_WAKEWORD:
+			self.wake_buffer.extend(audio_data)
+			if self.__lq_recognizer.AcceptWaveform(in_data):
+				self.recognized.set()
+		elif self.mode == RECORDING_COMMAND:
+			self.__hq_stream.write(audio_data)
+			self.missed_frames += frame_count
+
+
+		return (None, pyaudio.paContinue)
+
+	def reset_offline_recognizer(self):
+		self.missed_frames = 0
+		self.__lq_recognizer = KaldiRecognizer(Model("model"), self.__framerate,'["' + self.__wake_word + '"]')
+
+	def recognize_stream(self):
+		self.start_time = time.time()
+		while True:
+			self.recognized.wait()
+			self.recognized.clear()
+
+			result = self.__lq_recognizer.Result()
+
+			jres = json.loads(result)
+			if not self.__active and jres["text"] == self.__wake_word:
+				self.on_triggered()
+				self.mode = RECORDING_COMMAND
+
+				wakeword_end_time = 0
+				for res in jres["result"]:
+					if res["word"] == self.__wake_word:
+						wakeword_end_time = res["end"]
+
+				lag = time.time() - self.start_time - wakeword_end_time - (self.missed_frames / self.__framerate)
+				lag = int(round((lag) * self.__framerate))
+
+				start_data = self.wake_buffer.get(lag)
+				self.fut = self.__hq_recognizer.recognize_once_async()
+				missed = start_data[:lag]
+				missed = np.resize(missed, self.__framerate)
+				self.__hq_stream.write(missed)
+
 
 	def start_listening(self):
 		p = pyaudio.PyAudio()
 		stream = p.open(format=pyaudio.paInt16,
 		                channels=1,
-		                rate=16000,
+		                rate=self.__framerate,
 		                input=True,
-		                frames_per_buffer=8000)
+		                frames_per_buffer=1024,
+						stream_callback=self.audio_callback)
 		stream.start_stream()
 		self.on_ready()
-		while True:
-			data = stream.read(4000)
-			if len(data) == 0:
-				break
-			if self.__lq_recognizer.AcceptWaveform(data):
-				result = self.__lq_recognizer.Result()
-				jres = json.loads(result)
-				if not self.__active and jres["text"] == self.__keyword:
-					if self.next_activation > time.time():
-						continue
-					self.__active = True
-					t = threading.Thread(target=self.listen_for_command)
-					t.daemon = True
-					t.start()
-					self.next_activation = time.time() + 5
+		self.recognize_stream()
